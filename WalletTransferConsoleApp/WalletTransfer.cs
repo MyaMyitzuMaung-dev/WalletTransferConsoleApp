@@ -1,4 +1,5 @@
 ﻿using Microsoft.Data.SqlClient;
+using System.Transactions;
 
 namespace WalletTransferConsoleApp;
 
@@ -39,17 +40,17 @@ public class WalletTransfer
         connection.Open();
 
         using SqlTransaction transaction = connection.BeginTransaction();
-
+        //sqlTransaction = atomic operation လုပ်နိုင်အောင် (sender deduct + receiver add + transaction record) မှားရင် rollback လုပ်နိုင်
         try
         {
-            // ✅ Load sender & receiver info in one query each
+            //sender & receiver info in one query each
             var sender = GetWallet(connection, transaction, fromMobile);
             var receiver = GetWallet(connection, transaction, toMobile);
 
             if (receiver == null)
             {
                 Console.WriteLine("Recipient not found.");
-                transaction.Rollback();
+                transaction.Rollback();//this means cancel the transaction, no changes will be made to the database
                 return;
             }
 
@@ -67,11 +68,11 @@ public class WalletTransfer
                 return;
             }
 
-            // ✅ Move money
+            // Move money
             UpdateBalance(connection, transaction, fromMobile, -amount);
             UpdateBalance(connection, transaction, toMobile, amount);
 
-            // ✅ Create transaction record (double-entry)
+            // Create transaction record (double-entry)
             string txnId = Guid.NewGuid().ToString().ToUpper()[..8];
             DateTime now = DateTime.Now;
 
@@ -90,37 +91,35 @@ public class WalletTransfer
         }
     }
 
-    // ✅ Helper: Load wallet info
     private Wallet? GetWallet(SqlConnection conn, SqlTransaction tx, string mobile)
     {
         string query = "SELECT WalletId, FullName, Balance FROM Wallets WHERE MobileNo = @Mobile AND IsDelete = 0";
         SqlCommand cmd = new(query, conn, tx);
-        cmd.Parameters.AddWithValue("@Mobile", mobile);
+        cmd.Parameters.AddWithValue("@Mobile", mobile); //Parameter ကို Value ထည့်
 
         using SqlDataReader reader = cmd.ExecuteReader();
         if (!reader.Read()) return null;
 
         var wallet = new Wallet(
-            reader.GetString(0),
-            reader.GetString(1),
-            mobile,
-            reader.GetDecimal(2)
+            reader.GetString(0), //WalletId
+            reader.GetString(1), //FullName
+            mobile,              //MobileNo (from input)
+            reader.GetDecimal(2) //Balance
         );
         reader.Close();
         return wallet;
     }
 
-    // ✅ Helper: Update balance
-    private void UpdateBalance(SqlConnection conn, SqlTransaction tx, string mobile, decimal delta)
+    private void UpdateBalance(SqlConnection conn, SqlTransaction tx, string mobile, decimal amount)
     {
-        string query = "UPDATE Wallets SET Balance = Balance + @Delta WHERE MobileNo = @Mobile";
+        string query = "UPDATE Wallets SET Balance = Balance + @Amount WHERE MobileNo = @Mobile";
         SqlCommand cmd = new(query, conn, tx);
-        cmd.Parameters.AddWithValue("@Delta", delta);
+        cmd.Parameters.AddWithValue("@Amount", amount);
         cmd.Parameters.AddWithValue("@Mobile", mobile);
         cmd.ExecuteNonQuery();
     }
 
-    // ✅ Helper: Insert transaction
+    //Transaction Record ထည့်မယ့် Method
     private void InsertTransaction(SqlConnection conn, SqlTransaction tx, string txnId,
         string from, string to, decimal amount, string message, DateTime time)
     {
@@ -136,13 +135,4 @@ public class WalletTransfer
         cmd.Parameters.AddWithValue("@Time", time);
         cmd.ExecuteNonQuery();
     }
-}
-
-// ✅ Wallet class (like your mock)
-public class Wallet(string walletId, string fullName, string mobileNo, decimal balance)
-{
-    public string WalletId { get; set; } = walletId;
-    public string FullName { get; set; } = fullName;
-    public string MobileNo { get; set; } = mobileNo;
-    public decimal Balance { get; set; } = balance;
 }
