@@ -1,4 +1,5 @@
-﻿using Microsoft.Data.SqlClient;
+﻿//ADO.Net
+using Microsoft.Data.SqlClient;
 using System.Transactions;
 
 namespace WalletTransferConsoleApp;
